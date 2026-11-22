@@ -13,16 +13,19 @@ android {
         applicationId = "com.sharath.statusbartotal"
         minSdk = 33
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 5
+        versionName = "3.1"
 
     }
 
     buildTypes {
         release {
+            // Same key as the debug builds already on the phone, so updates keep the data.
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // Whole-app optimization. A package-limited scope (androidx/kotlin only)
+                // crashed on start: IllegalAccessError between optimized and unoptimized classes.
             }
         }
     }

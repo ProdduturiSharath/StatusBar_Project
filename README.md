@@ -15,6 +15,8 @@ Permissions: show notifications, start after boot. Nothing else.
 | **V2** | Categories (UPI, CC, CC UPI); credit cards with 3-letter codes (`450 abc`); recurring payments (EMI with months left, Autopay, Subscription) added automatically every month; Reset; per-bucket breakdown in the notification. |
 | **V3** | New colourful UI (Jetpack Compose, Material 3) with Home, History, Recurring and Cards tabs; donut chart by bucket; history with undo; upcoming dues this month; automatic monthly reset day. |
 
+| **V3.1** | Optimized release build (R8, whole app): about 2.3 MB instead of 26 MB, smoother UI. Signed with the same key, so it updates V3.0 in place. |
+
 V1 and V2 were not committed separately; this repository starts at V3. The
 design documents for every version are in `docs/designs/`.
 
@@ -38,13 +40,24 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew.bat assembleDe
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`
 
+Optimized build (use this one on the phone):
+
+```
+JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew.bat assembleRelease
+```
+
+APK: `app/build/outputs/apk/release/app-release.apk` (signed with the debug
+key on purpose, so it installs over debug builds without losing data). Keep
+R8 optimization for the whole app: limiting it to library packages crashed the
+app on start.
+
 ## Install
 
 Phone: Developer options → USB debugging (and "Install via USB"), connect by
 USB, then:
 
 ```
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 Updates keep all data as long as they are signed with the same key. Builds
