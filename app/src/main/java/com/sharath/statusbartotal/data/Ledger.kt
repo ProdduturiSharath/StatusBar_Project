@@ -36,9 +36,11 @@ sealed class HistoryItem {
 class Ledger(private val file: File) {
 
     /**
-     * total, lastEntry, buckets and cycleStart cover entries after the last reset; appliedSources
-     * and autoResetMonths cover the whole file. Bucket keys: "UPI", "CC", "CCUPI", "card:<code>".
-     * cycleStart is the time of the last reset line, or of the first entry if there is none.
+     * total, lastEntry, buckets and cycleStart cover entries after the last reset; appliedSources,
+     * autoResetMonths and notes cover the whole file (appliedSources includes deleted entries).
+     * Bucket keys: "UPI", "CC", "CCUPI", "card:<code>". cycleStart is the time of the last reset
+     * line, or of the first remaining entry if there is none. cycleKey is the line id of the last
+     * reset line (0 before the first reset). cardCcUpi is the CC UPI part of each card bucket.
      */
     data class Snapshot(
         val total: Long,
@@ -46,10 +48,19 @@ class Ledger(private val file: File) {
         val buckets: Map<String, Long>,
         val appliedSources: Set<String>,
         val autoResetMonths: Set<YearMonth> = emptySet(),
-        val cycleStart: Long? = null
+        val cycleStart: Long? = null,
+        val cycleKey: Int = 0,
+        val notes: Set<String> = emptySet(),
+        val lastLineId: Int = 0,
+        val cardCcUpi: Map<String, Long> = emptyMap()
     )
 
-    private fun empty() = Snapshot(0L, null, emptyMap(), emptySet())
+    private class Parsed(
+        val items: List<HistoryItem>,
+        val sources: Set<String>,
+        val notes: Set<String>,
+        val lastLineId: Int
+    )
 
     fun addEntry(
         amount: Long, timeMillis: Long, category: Category, card: String?, source: String?
@@ -58,6 +69,18 @@ class Ledger(private val file: File) {
     /** A manual reset, or an automatic one when [autoMonth] is given. */
     fun reset(timeMillis: Long, autoMonth: YearMonth? = null): Boolean =
         append(if (autoMonth == null) "R,$timeMillis\n" else "R,$timeMillis,auto@$autoMonth\n")
+
+    /** A note line, for example "budget@0:30000". Keys must not contain commas or line breaks. */
+    fun addNote(timeMillis: Long, key: String): Boolean {
+        if (key.isEmpty() || key.any { it == ',' || it == '\n' || it == '\r' }) return false
+        return append("N,$timeMillis,$key\n")
+    }
+
+    /** Tombstone: every entry line with an id in [fromId]..[toId] is ignored from now on. */
+    fun deleteRange(timeMillis: Long, fromId: Int, toId: Int): Boolean {
+        if (fromId < 1 || toId < fromId) return false
+        return append("D,$timeMillis,$fromId-$toId\n")
+    }
 
     /** Adds the opposite of entry [id]. False if it is missing, an undo, already undone, or the write fails. */
     fun undo(id: Int, timeMillis: Long): Boolean {
@@ -79,12 +102,23 @@ class Ledger(private val file: File) {
         return String(bytes, 0, end, Charsets.UTF_8)
     }
 
-    /** Every entry and reset, oldest first. The id is the 1-based line number. */
-    fun history(): List<HistoryItem> {
-        val text = completeText() ?: return emptyList()
+    private fun parseRange(s: String): IntRange? {
+        val i = s.indexOf('-')
+        if (i < 1) return null
+        val from = s.substring(0, i).toIntOrNull() ?: return null
+        val to = s.substring(i + 1).toIntOrNull() ?: return null
+        return if (from >= 1 && to >= from) from..to else null
+    }
+
+    private fun parse(extra: IntRange?): Parsed {
+        val text = completeText() ?: return Parsed(emptyList(), emptySet(), emptySet(), 0)
         val lines = text.split('\n').dropLast(1)
-        val out = ArrayList<HistoryItem>()
-        val undoneIds = HashSet<Int>()
+        val entries = ArrayList<HistoryItem.Entry>()
+        val resets = ArrayList<HistoryItem.Reset>()
+        val ranges = ArrayList<IntRange>()
+        if (extra != null) ranges.add(extra)
+        val notes = HashSet<String>()
+        val sources = HashSet<String>()
         lines.forEachIndexed { index, line ->
             val id = index + 1
             val parts = line.split(",")
@@ -103,10 +137,8 @@ class Ledger(private val file: File) {
                     card = parts[4].ifEmpty { null }
                     source = parts[5].ifEmpty { null }
                 }
-                if (source != null && source.startsWith(UNDO_PREFIX)) {
-                    source.removePrefix(UNDO_PREFIX).toIntOrNull()?.let { undoneIds.add(it) }
-                }
-                out.add(HistoryItem.Entry(id, time, amount, category, card, source, false))
+                if (source != null) sources.add(source)
+                entries.add(HistoryItem.Entry(id, time, amount, category, card, source, false))
             } else if ((parts.size == 2 || parts.size == 3) && parts[0] == "R") {
                 val time = parts[1].toLongOrNull() ?: return@forEachIndexed
                 var month: YearMonth? = null
@@ -117,45 +149,85 @@ class Ledger(private val file: File) {
                         null
                     }
                 }
-                out.add(HistoryItem.Reset(id, time, month != null, month))
+                resets.add(HistoryItem.Reset(id, time, month != null, month))
+            } else if (parts.size == 3 && parts[0] == "D") {
+                if (parts[1].toLongOrNull() != null) parseRange(parts[2])?.let { ranges.add(it) }
+            } else if (parts.size == 3 && parts[0] == "N") {
+                if (parts[1].toLongOrNull() != null && parts[2].isNotEmpty()) notes.add(parts[2])
             }
         }
-        if (undoneIds.isEmpty()) return out
-        return out.map {
-            if (it is HistoryItem.Entry && !it.isUndoEntry && it.id in undoneIds)
-                it.copy(undone = true) else it
+        val deleted = HashSet<Int>()
+        for (e in entries) if (ranges.any { e.id in it }) deleted.add(e.id)
+        // An undo and its original are deleted together, whichever of the two was tombstoned.
+        val entryIds = entries.map { it.id }.toHashSet()
+        for (e in entries) {
+            val target = undoTarget(e) ?: continue
+            if (target !in entryIds) continue
+            if (e.id in deleted || target in deleted) {
+                deleted.add(e.id)
+                deleted.add(target)
+            }
         }
+        val visible = entries.filter { it.id !in deleted }
+        val undoneIds = HashSet<Int>()
+        for (e in visible) undoTarget(e)?.let { undoneIds.add(it) }
+        val items = ArrayList<HistoryItem>(visible.size + resets.size)
+        for (e in visible) {
+            items.add(if (!e.isUndoEntry && e.id in undoneIds) e.copy(undone = true) else e)
+        }
+        items.addAll(resets)
+        items.sortBy { it.id }
+        return Parsed(items, sources, notes, lines.size)
     }
 
-    fun snapshot(): Snapshot {
-        val items = history()
-        if (items.isEmpty()) return empty()
+    private fun undoTarget(e: HistoryItem.Entry): Int? =
+        if (e.isUndoEntry) e.source!!.removePrefix(UNDO_PREFIX).toIntOrNull() else null
+
+    /** Every remaining entry and every reset, oldest first. The id is the 1-based line number. */
+    fun history(): List<HistoryItem> = parse(null).items
+
+    fun snapshot(): Snapshot = snapshot(null)
+
+    /**
+     * The snapshot as it would be after a tombstone covering [extraDeleted] (used to preview what
+     * a delete changes in the current total).
+     */
+    fun snapshot(extraDeleted: IntRange?): Snapshot {
+        val parsed = parse(extraDeleted)
         var total = 0L
         var last: Long? = null
         var buckets = HashMap<String, Long>()
-        val sources = HashSet<String>()
+        var cardCcUpi = HashMap<String, Long>()
         val resets = HashSet<YearMonth>()
         var firstEntry: Long? = null
         var lastReset: Long? = null
-        for (item in items) {
+        var cycleKey = 0
+        for (item in parsed.items) {
             when (item) {
                 is HistoryItem.Entry -> {
-                    if (item.source != null) sources.add(item.source)
                     if (firstEntry == null) firstEntry = item.timeMillis
                     total += item.amount
                     last = item.amount
                     buckets[item.bucketKey] = (buckets[item.bucketKey] ?: 0L) + item.amount
+                    if (item.category == Category.CCUPI && item.card != null) {
+                        cardCcUpi[item.card] = (cardCcUpi[item.card] ?: 0L) + item.amount
+                    }
                 }
                 is HistoryItem.Reset -> {
                     item.autoMonth?.let { resets.add(it) }
                     lastReset = item.timeMillis
+                    cycleKey = item.id
                     total = 0L
                     last = null
                     buckets = HashMap()
+                    cardCcUpi = HashMap()
                 }
             }
         }
-        return Snapshot(total, last, buckets, sources, resets, lastReset ?: firstEntry)
+        return Snapshot(
+            total, last, buckets, parsed.sources, resets, lastReset ?: firstEntry,
+            cycleKey, parsed.notes, parsed.lastLineId, cardCcUpi
+        )
     }
 
     private fun append(line: String): Boolean {

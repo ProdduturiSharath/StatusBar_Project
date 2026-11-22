@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -39,6 +40,7 @@ fun MainScreen(state: AppState) {
     val tabs = listOf(
         TabDef("Home", Icons.Default.Home),
         TabDef("History", Icons.AutoMirrored.Filled.List),
+        TabDef("Summary", Icons.Default.DateRange),
         TabDef("Recurring", Icons.Default.Refresh),
         TabDef("Cards", Icons.Default.AccountBox)
     )
@@ -78,9 +80,10 @@ fun MainScreen(state: AppState) {
             .consumeWindowInsets(pad)
             .imePadding()
         when (tab) {
-            0 -> HomeTab(state, snackbar, content)
+            0 -> HomeTab(state, snackbar, onOpenCards = { tab = 4 }, modifier = content)
             1 -> HistoryTab(state, content)
-            2 -> RecurringTab(state, content)
+            2 -> SummaryTab(state, content)
+            3 -> RecurringTab(state, content)
             else -> CardsTab(state, content)
         }
     }
@@ -88,8 +91,13 @@ fun MainScreen(state: AppState) {
     if (showSettings) {
         SettingsDialog(
             currentDay = state.settings.autoResetDay,
-            onSave = {
-                state.setAutoResetDay(it)
+            currentBudget = state.settings.budget,
+            currentShowLeft = state.settings.showLeft,
+            onSave = { day, budget, showLeft ->
+                state.setAutoResetDay(day)
+                state.setBudget(budget)
+                // "Budget left" needs a budget; without one, fall back to total.
+                state.setShowLeft(showLeft && budget != null)
                 showSettings = false
             },
             onDismiss = { showSettings = false }

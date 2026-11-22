@@ -30,6 +30,9 @@ object AppColors {
     )
     val Negative = Color(0xFFD32F2F)
     val NegativeDark = Color(0xFFFF6B6B)
+    val Positive = Color(0xFF2E7D32)
+    val PositiveDark = Color(0xFF66BB6A)
+    val Amber = Color(0xFFF4A300)
 
     /** Colour for a bucket key ("UPI", "CC", "CCUPI", "card:<code>"). */
     fun bucket(key: String, cardCodes: List<String>): Color = when (key) {
@@ -53,6 +56,9 @@ fun heroBrush(): Brush =
 
 @Composable
 fun negativeColor(): Color = if (isSystemInDarkTheme()) AppColors.NegativeDark else AppColors.Negative
+
+@Composable
+fun positiveColor(): Color = if (isSystemInDarkTheme()) AppColors.PositiveDark else AppColors.Positive
 
 private val LightColors = lightColorScheme(
     primary = AppColors.Indigo,

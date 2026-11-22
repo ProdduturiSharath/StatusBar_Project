@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.sharath.statusbartotal.RecurringRunner
 import com.sharath.statusbartotal.core.Category
+import com.sharath.statusbartotal.core.CycleInfo
+import com.sharath.statusbartotal.core.Cycles
 import com.sharath.statusbartotal.core.Recurring
 import com.sharath.statusbartotal.core.RecurringRules
 import com.sharath.statusbartotal.core.Upcoming
@@ -17,10 +19,14 @@ import com.sharath.statusbartotal.data.HistoryItem
 import com.sharath.statusbartotal.data.Ledger
 import com.sharath.statusbartotal.data.RecurringStore
 import com.sharath.statusbartotal.data.SettingsStore
+import com.sharath.statusbartotal.notify.Reports
 import com.sharath.statusbartotal.notify.TotalNotifier
 import java.io.File
 import java.time.LocalDate
 import java.time.YearMonth
+
+/** Result of a manual reset: [ok] is the reset itself, [reportFailed] a report that could not be saved. */
+class ResetResult(val ok: Boolean, val reportFailed: Boolean)
 
 /** Plain holder of everything the screens show. Every action refreshes the notification and reloads. */
 class AppState(private val context: Context) {
@@ -32,6 +38,8 @@ class AppState(private val context: Context) {
     var snapshot by mutableStateOf(Ledger.Snapshot(0L, null, emptyMap(), emptySet()))
         private set
     var history by mutableStateOf<List<HistoryItem>>(emptyList())
+        private set
+    var cycles by mutableStateOf<List<CycleInfo>>(emptyList())
         private set
     var cards by mutableStateOf<List<Card>>(emptyList())
         private set
@@ -46,12 +54,25 @@ class AppState(private val context: Context) {
 
     val cardNames: Map<String, String> get() = cards.associate { it.code to it.name }
 
+    val ccUpiDefault: Card? get() = cards.firstOrNull { it.ccUpiDefault }
+
+    /** The card of the most recent CC entry whose card still exists. */
+    val lastCcCard: String?
+        get() {
+            val codes = cards.map { it.code }.toSet()
+            return history.lastOrNull {
+                it is HistoryItem.Entry && it.category == Category.CC && !it.isUndoEntry &&
+                    it.card != null && it.card in codes
+            }.let { (it as? HistoryItem.Entry)?.card }
+        }
+
     /** Catch-up and notification refresh first, then reload every list. */
     fun reload() {
         TotalNotifier.refresh(context)
         canNotify = TotalNotifier.canNotify(context)
         snapshot = ledger.snapshot()
         history = ledger.history()
+        cycles = Cycles.build(history)
         cards = cardStore.read()
         recurring = recurringStore.read()
         settings = settingsStore.read()
@@ -59,6 +80,12 @@ class AppState(private val context: Context) {
             it.id to RecurringRules.appliedMonths(it.id, snapshot.appliedSources)
         }
         upcoming = Upcoming.compute(recurring, applied, LocalDate.now())
+    }
+
+    /** App open: normal reload, then retry a report that failed to save earlier. */
+    fun onOpen() {
+        reload()
+        Reports.retryMissing(context)
     }
 
     fun appliedMonths(r: Recurring): Set<YearMonth> =
@@ -69,11 +96,26 @@ class AppState(private val context: Context) {
         val ok = ledger.addEntry(amount, System.currentTimeMillis(), category, card, null)
         if (!ok) return null
         reload()
-        return history.lastOrNull()?.id
+        return history.lastOrNull { it is HistoryItem.Entry }?.id
     }
 
     fun undo(id: Int): Boolean {
         val ok = ledger.undo(id, System.currentTimeMillis())
+        reload()
+        return ok
+    }
+
+    /**
+     * The current total before and after a tombstone over [fromId]..[toId]: the same snapshot
+     * function run with and without the proposed tombstone.
+     */
+    fun previewDelete(fromId: Int, toId: Int): Pair<Long, Long> {
+        val l = ledger
+        return l.snapshot().total to l.snapshot(fromId..toId).total
+    }
+
+    fun deleteRange(fromId: Int, toId: Int): Boolean {
+        val ok = ledger.deleteRange(System.currentTimeMillis(), fromId, toId)
         reload()
         return ok
     }
@@ -85,14 +127,25 @@ class AppState(private val context: Context) {
         return snapshot.total
     }
 
-    fun reset(): Boolean {
-        val ok = ledger.reset(System.currentTimeMillis())
+    fun reset(saveReport: Boolean): ResetResult {
+        val now = System.currentTimeMillis()
+        val reportOk = if (saveReport) Reports.beforeReset(context, now) else true
+        val ok = ledger.reset(now)
+        reload()
+        return ResetResult(ok, !reportOk)
+    }
+
+    /** Exports the current cycle to Downloads/StatusBarTotal. */
+    fun exportReport(): Boolean = Reports.export(context)
+
+    fun addCard(code: String, name: String): Boolean {
+        val ok = cardStore.add(code, name)
         reload()
         return ok
     }
 
-    fun addCard(code: String, name: String): Boolean {
-        val ok = cardStore.add(code, name)
+    fun updateCard(code: String, name: String, dueDay: Int?, ccUpiDefault: Boolean): Boolean {
+        val ok = cardStore.update(code, name, dueDay, ccUpiDefault)
         reload()
         return ok
     }
@@ -103,7 +156,8 @@ class AppState(private val context: Context) {
         return ok
     }
 
-    fun cardInUse(code: String): Boolean = recurringStore.read().any { it.card == code }
+    /** Recurring payments that use the card. */
+    fun recurringUsing(code: String): List<Recurring> = recurringStore.read().filter { it.card == code }
 
     fun addRecurring(r: Recurring): Boolean {
         val ok = recurringStore.add(r)
@@ -119,6 +173,18 @@ class AppState(private val context: Context) {
 
     fun setAutoResetDay(day: Int?): Boolean {
         val ok = settingsStore.setAutoResetDay(day, System.currentTimeMillis())
+        reload()
+        return ok
+    }
+
+    fun setBudget(budget: Long?): Boolean {
+        val ok = settingsStore.setBudget(budget)
+        reload()
+        return ok
+    }
+
+    fun setShowLeft(showLeft: Boolean): Boolean {
+        val ok = settingsStore.setShowLeft(showLeft)
         reload()
         return ok
     }

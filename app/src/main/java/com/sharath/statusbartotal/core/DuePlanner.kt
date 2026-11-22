@@ -12,14 +12,25 @@ sealed class DueEvent {
     ) : DueEvent()
 
     data class AutoResetDue(val month: YearMonth, override val due: LocalDateTime) : DueEvent()
+
+    data class CardReminderDue(val reminder: ReminderDue) : DueEvent() {
+        override val due: LocalDateTime get() = reminder.moment
+    }
 }
 
 object DuePlanner {
     private val RECURRING_TIME: LocalTime = LocalTime.of(0, 5)
 
+    private fun priority(e: DueEvent): Int = when (e) {
+        is DueEvent.AutoResetDue -> 0
+        is DueEvent.RecurringDue -> 1
+        is DueEvent.CardReminderDue -> 2
+    }
+
     /**
-     * Everything owed right now, in the order it must be written: sorted by due instant, and an
-     * auto-reset (00:00) before a recurring payment (00:05) on the same day.
+     * Everything owed right now, in the order it must be written: sorted by due instant, and on
+     * the same instant an auto-reset before a recurring payment before a card reminder. Card
+     * reminders are only included while their due date has not passed.
      */
     fun plan(
         items: List<Recurring>,
@@ -27,7 +38,9 @@ object DuePlanner {
         autoDay: Int?,
         since: LocalDateTime?,
         appliedResets: Set<YearMonth>,
-        now: LocalDateTime
+        now: LocalDateTime,
+        cardDueDays: Map<String, Int> = emptyMap(),
+        notes: Set<String> = emptySet()
     ): List<DueEvent> {
         val events = ArrayList<DueEvent>()
         for (r in items) {
@@ -45,27 +58,28 @@ object DuePlanner {
                 events.add(DueEvent.AutoResetDue(m, at))
             }
         }
-        return events.sortedWith(
-            compareBy<DueEvent> { it.due }.thenBy { if (it is DueEvent.AutoResetDue) 0 else 1 }
-        )
+        for (rem in Reminders.missing(cardDueDays, notes, now)) {
+            events.add(DueEvent.CardReminderDue(rem))
+        }
+        return events.sortedWith(compareBy<DueEvent> { it.due }.thenBy { priority(it) })
     }
 
-    /** The earliest of the next recurring due instant and the next auto-reset moment. */
+    /** The earliest of the next recurring due instant, auto-reset moment and card reminder. */
     fun nextWake(
         items: List<Recurring>,
         applied: Map<Long, Set<YearMonth>>,
         autoDay: Int?,
-        now: LocalDateTime
+        now: LocalDateTime,
+        cardDueDays: Map<String, Int> = emptyMap(),
+        notes: Set<String> = emptySet()
     ): LocalDateTime? {
         var earliest: LocalDateTime? = null
-        for (r in items) {
-            val next = RecurringRules.nextDue(r, applied[r.id] ?: emptySet(), now) ?: continue
-            if (earliest == null || next.isBefore(earliest)) earliest = next
+        fun consider(t: LocalDateTime?) {
+            if (t != null && (earliest == null || t.isBefore(earliest))) earliest = t
         }
-        if (autoDay != null) {
-            val next = AutoReset.nextAfter(autoDay, now)
-            if (earliest == null || next.isBefore(earliest)) earliest = next
-        }
+        for (r in items) consider(RecurringRules.nextDue(r, applied[r.id] ?: emptySet(), now))
+        if (autoDay != null) consider(AutoReset.nextAfter(autoDay, now))
+        consider(Reminders.nextAfter(cardDueDays, notes, now))
         return earliest
     }
 }

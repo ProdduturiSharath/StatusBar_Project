@@ -1,6 +1,7 @@
 package com.sharath.statusbartotal.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -17,12 +18,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +40,8 @@ import com.sharath.statusbartotal.data.Card as CardData
 fun CardsTab(state: AppState, modifier: Modifier = Modifier) {
     var showAdd by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<CardData?>(null) }
-    var inUse by remember { mutableStateOf<CardData?>(null) }
+    var editTarget by remember { mutableStateOf<CardData?>(null) }
+    var inUse by remember { mutableStateOf<Pair<CardData, List<String>>?>(null) }
     var failed by remember { mutableStateOf(false) }
     val codes = state.cards.map { it.code }
 
@@ -65,7 +65,9 @@ fun CardsTab(state: AppState, modifier: Modifier = Modifier) {
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { editTarget = c }
                 ) {
                     Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -86,11 +88,24 @@ fun CardsTab(state: AppState, modifier: Modifier = Modifier) {
                                 "This cycle: " + Fmt.rupees(total),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        IconButton(onClick = {
-                            if (state.cardInUse(c.code)) inUse = c else deleteTarget = c
-                        }) {
-                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                            val upi = state.snapshot.cardCcUpi[c.code] ?: 0L
+                            if (upi != 0L) {
+                                Text(
+                                    "incl. CC UPI " + Fmt.rupees(upi),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val notes = listOfNotNull(
+                                c.dueDay?.let { "Bill due on the ${Fmt.ordinal(it)}" },
+                                if (c.ccUpiDefault) "Default for CC UPI" else null
+                            )
+                            if (notes.isNotEmpty()) {
+                                Text(
+                                    notes.joinToString(" · "),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
                     }
                 }
@@ -107,8 +122,22 @@ fun CardsTab(state: AppState, modifier: Modifier = Modifier) {
     if (showAdd) {
         AddCardDialog(state.cards, onAdd = { code, name -> state.addCard(code, name) }, onDismiss = { showAdd = false })
     }
-    inUse?.let { c ->
-        InfoDialog(stringResource(R.string.card_in_use, c.code.uppercase())) { inUse = null }
+    editTarget?.let { c ->
+        EditCardDialog(
+            card = c,
+            onSave = { name, due, default -> state.updateCard(c.code, name, due, default) },
+            onDelete = {
+                editTarget = null
+                val users = state.recurringUsing(c.code)
+                if (users.isNotEmpty()) inUse = c to users.map { it.name } else deleteTarget = c
+            },
+            onDismiss = { editTarget = null }
+        )
+    }
+    inUse?.let { (c, names) ->
+        InfoDialog(
+            stringResource(R.string.card_in_use, c.code.uppercase()) + " (" + names.joinToString(", ") + ")"
+        ) { inUse = null }
     }
     deleteTarget?.let { c ->
         ConfirmDialog(

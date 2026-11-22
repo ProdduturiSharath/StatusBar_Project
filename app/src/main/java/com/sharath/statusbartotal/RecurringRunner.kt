@@ -7,6 +7,10 @@ import android.content.Intent
 import com.sharath.statusbartotal.core.DueEvent
 import com.sharath.statusbartotal.core.DuePlanner
 import com.sharath.statusbartotal.core.RecurringRules
+import com.sharath.statusbartotal.core.Reminders
+import com.sharath.statusbartotal.data.Cards
+import com.sharath.statusbartotal.notify.AlertNotifier
+import com.sharath.statusbartotal.notify.Reports
 import com.sharath.statusbartotal.data.Ledger
 import com.sharath.statusbartotal.data.RecurringStore
 import com.sharath.statusbartotal.data.SettingsStore
@@ -39,8 +43,12 @@ object RecurringRunner {
         val since = settings.autoResetSince?.let {
             LocalDateTime.ofInstant(Instant.ofEpochMilli(it), zone)
         }
+        val cards = Cards(File(context.filesDir, "cards.txt")).read()
+        val dueDays = HashMap<String, Int>()
+        for (c in cards) c.dueDay?.let { dueDays[c.code] = it }
+        val notes = snapshot.notes.toMutableSet()
         val events = DuePlanner.plan(
-            items, applied, settings.autoResetDay, since, snapshot.autoResetMonths, now
+            items, applied, settings.autoResetDay, since, snapshot.autoResetMonths, now, dueDays, notes
         )
         var failed = false
         for (e in events) {
@@ -49,8 +57,24 @@ object RecurringRunner {
                     e.item.amount, nowMillis, e.item.category, e.item.card,
                     "${e.item.id}@${e.month}"
                 )
-                is DueEvent.AutoResetDue ->
-                    ledger.reset(e.due.atZone(zone).toInstant().toEpochMilli(), e.month)
+                is DueEvent.AutoResetDue -> {
+                    val atMillis = e.due.atZone(zone).toInstant().toEpochMilli()
+                    // The report of the closing cycle is written first; a failure never blocks the reset.
+                    Reports.beforeReset(context, atMillis)
+                    ledger.reset(atMillis, e.month)
+                }
+                is DueEvent.CardReminderDue -> {
+                    val rem = e.reminder
+                    if (AlertNotifier.canShow(context)) {
+                        val amount = ledger.snapshot().buckets["card:" + rem.code] ?: 0L
+                        val name = cards.firstOrNull { it.code == rem.code }?.name
+                        AlertNotifier.reminder(context, rem.code, name, rem.dueDate, amount)
+                        if (ledger.addNote(nowMillis, Reminders.key(rem.code, rem.dueMonth))) {
+                            notes.add(Reminders.key(rem.code, rem.dueMonth))
+                        }
+                    }
+                    true
+                }
             }
             if (!ok) {
                 failed = true
@@ -59,7 +83,7 @@ object RecurringRunner {
             if (e is DueEvent.RecurringDue) applied.getValue(e.item.id).add(e.month)
         }
 
-        val earliest = DuePlanner.nextWake(items, applied, settings.autoResetDay, now)
+        val earliest = DuePlanner.nextWake(items, applied, settings.autoResetDay, now, dueDays, notes)
         val alarmManager = context.getSystemService(AlarmManager::class.java)
         val pending = PendingIntent.getBroadcast(
             context, REQ_ALARM, Intent(context, RecurringAlarmReceiver::class.java),

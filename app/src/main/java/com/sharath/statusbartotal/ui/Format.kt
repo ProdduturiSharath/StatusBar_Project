@@ -32,8 +32,8 @@ object Fmt {
 
     fun bucketLabel(key: String, cardNames: Map<String, String>): String = when (key) {
         "UPI" -> "UPI"
-        "CC" -> "CC"
-        "CCUPI" -> "CC UPI"
+        "CC" -> "CC (no card)"
+        "CCUPI" -> "CC UPI (no card)"
         else -> {
             val code = key.removePrefix("card:")
             val name = cardNames[code]

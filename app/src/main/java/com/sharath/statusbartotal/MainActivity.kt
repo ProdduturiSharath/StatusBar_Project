@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        state.reload()
+        state.onOpen()
     }
 
     override fun onRequestPermissionsResult(

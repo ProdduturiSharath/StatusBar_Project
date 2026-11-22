@@ -4,6 +4,10 @@ sealed class ParseResult {
     data class Ok(val amount: Long, val category: Category, val card: String?) : ParseResult()
     object BadAmount : ParseResult()
     data class NoCard(val word: String) : ParseResult()
+    /** "450 cc" without a card code. */
+    object NeedCard : ParseResult()
+    /** "450 ccupi" while no card is marked as the CC UPI default. */
+    object NoCcUpiCard : ParseResult()
 }
 
 object EntryParser {
@@ -27,7 +31,9 @@ object EntryParser {
     }
 
     /** Amount word, then optional category and/or card word. See the V2 spec. */
-    fun parseEntry(text: String, knownCards: Set<String>): ParseResult {
+    fun parseEntry(
+        text: String, knownCards: Set<String>, ccUpiDefault: String? = null
+    ): ParseResult {
         val trimmed = text.trim { it.isWhitespace() || it == ' ' }
         if (trimmed.isEmpty()) return ParseResult.BadAmount
         val words = trimmed.split(SPLIT)
@@ -42,7 +48,12 @@ object EntryParser {
                 if (w3 != null) ParseResult.BadAmount else ParseResult.Ok(amount, Category.UPI, null)
             "cc", "ccupi" -> {
                 val category = if (w2 == "cc") Category.CC else Category.CCUPI
-                if (w3 == null) ParseResult.Ok(amount, category, null)
+                if (w3 == null) when {
+                    category == Category.CC -> ParseResult.NeedCard
+                    ccUpiDefault != null && ccUpiDefault in knownCards ->
+                        ParseResult.Ok(amount, category, ccUpiDefault)
+                    else -> ParseResult.NoCcUpiCard
+                }
                 else cardResult(amount, category, w3, knownCards)
             }
             else ->

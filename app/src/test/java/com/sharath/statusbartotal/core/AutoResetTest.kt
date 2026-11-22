@@ -62,6 +62,7 @@ class AutoResetTest {
             when (it) {
                 is DueEvent.RecurringDue -> "R" + it.month
                 is DueEvent.AutoResetDue -> "A" + it.month
+                is DueEvent.CardReminderDue -> "C"
             }
         }
         assertEquals(

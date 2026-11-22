@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,6 +55,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.sharath.statusbartotal.R
 import com.sharath.statusbartotal.core.AutoReset
+import com.sharath.statusbartotal.core.Budget
+import com.sharath.statusbartotal.core.BudgetLevel
 import com.sharath.statusbartotal.core.Category
 import com.sharath.statusbartotal.core.EntryParser
 import com.sharath.statusbartotal.core.RecurringType
@@ -62,9 +66,13 @@ import java.time.LocalDateTime
 import java.util.Locale
 
 @Composable
-fun HomeTab(state: AppState, snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
+fun HomeTab(
+    state: AppState, snackbar: SnackbarHostState, onOpenCards: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     var resetTotal by remember { mutableStateOf<Long?>(null) }
     var resetFailed by remember { mutableStateOf(false) }
+    var reportFailed by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -73,25 +81,25 @@ fun HomeTab(state: AppState, snackbar: SnackbarHostState, modifier: Modifier = M
     ) {
         if (!state.canNotify) item { NotificationBanner() }
         item { HeroCard(state, onReset = { resetTotal = state.prepareReset() }) }
-        item { QuickAddCard(state, snackbar) }
+        item { QuickAddCard(state, snackbar, onOpenCards) }
         item { PieCard(state) }
         item { UpcomingCard(state) }
         item { KeepVisibleCard() }
     }
 
     resetTotal?.let { total ->
-        ConfirmDialog(
-            title = stringResource(R.string.reset_title),
-            message = stringResource(R.string.reset_message, RupeeFormat.exact(total)),
-            confirmText = stringResource(R.string.reset),
-            onConfirm = {
+        ResetDialog(
+            total = total,
+            onConfirm = { save ->
                 resetTotal = null
-                if (!state.reset()) resetFailed = true
+                val r = state.reset(save)
+                if (!r.ok) resetFailed = true else if (r.reportFailed) reportFailed = true
             },
             onDismiss = { resetTotal = null }
         )
     }
     if (resetFailed) InfoDialog(stringResource(R.string.error_save_failed)) { resetFailed = false }
+    if (reportFailed) InfoDialog("Couldn't save the report") { reportFailed = false }
 }
 
 @Composable
@@ -137,6 +145,8 @@ private fun HeroCard(state: AppState, onReset: () -> Unit) {
                 style = MaterialTheme.typography.headlineLarge
             )
             Text("$since · $resets", color = Color.White.copy(alpha = 0.85f))
+            val budget = state.settings.budget
+            if (budget != null) BudgetBar(snap.total, budget)
             Spacer(Modifier.size(4.dp))
             OutlinedButton(
                 onClick = onReset,
@@ -148,7 +158,34 @@ private fun HeroCard(state: AppState, onReset: () -> Unit) {
 }
 
 @Composable
-private fun QuickAddCard(state: AppState, snackbar: SnackbarHostState) {
+private fun BudgetBar(total: Long, budget: Long) {
+    val level = Budget.level(total, budget)
+    val barColor = when (level) {
+        BudgetLevel.OK -> Color.White
+        BudgetLevel.WARN -> AppColors.Amber
+        BudgetLevel.OVER -> Color(0xFFFF6B6B)
+    }
+    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(Budget.heroLine(total, budget), color = if (level == BudgetLevel.OK) Color.White else barColor)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.White.copy(alpha = 0.25f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(Budget.fraction(total, budget))
+                    .height(8.dp)
+                    .background(barColor)
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickAddCard(state: AppState, snackbar: SnackbarHostState, onOpenCards: () -> Unit) {
     var amountText by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf(Category.UPI) }
     var card by rememberSaveable { mutableStateOf<String?>(null) }
@@ -157,14 +194,23 @@ private fun QuickAddCard(state: AppState, snackbar: SnackbarHostState) {
     val amountErr = stringResource(R.string.error_amount_main)
     val saveErr = stringResource(R.string.error_save_failed)
 
+    // CC and CC UPI always need a card: the chosen one, else the last-used CC card or the CC UPI default.
+    val effectiveCard: String? = when (category) {
+        Category.UPI -> null
+        Category.CC -> card?.takeIf { c -> state.cards.any { it.code == c } } ?: state.lastCcCard
+        Category.CCUPI -> card?.takeIf { c -> state.cards.any { it.code == c } }
+            ?: state.ccUpiDefault?.code
+    }
+    val canAdd = category == Category.UPI || effectiveCard != null
+
     fun submit() {
         val amount = EntryParser.parse(amountText)
         if (amount == null) {
             error = amountErr
             return
         }
-        val cardCode = if (category == Category.UPI) null else
-            card?.takeIf { code -> state.cards.any { it.code == code } }
+        val cardCode = effectiveCard
+        if (category != Category.UPI && cardCode == null) return
         val id = state.add(amount, category, cardCode)
         if (id == null) {
             error = saveErr
@@ -196,11 +242,22 @@ private fun QuickAddCard(state: AppState, snackbar: SnackbarHostState) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             modifier = Modifier.fillMaxWidth()
         )
-        CategoryChips(category) { category = it }
+        CategoryChips(category) { category = it; card = null }
         if (category != Category.UPI) {
-            CardDropdown(state.cards, card, { card = it }, Modifier.fillMaxWidth())
+            if (state.cards.isEmpty()) {
+                Text("Add a card first", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = onOpenCards) { Text("Go to Cards") }
+            } else {
+                CardDropdown(
+                    state.cards, effectiveCard, { card = it }, Modifier.fillMaxWidth(),
+                    allowNone = false, placeholder = "Choose a card"
+                )
+                if (category == Category.CCUPI && effectiveCard == null) {
+                    Text("Set a CC UPI card in Cards", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
-        Button(onClick = { submit() }, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { submit() }, enabled = canAdd, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.add))
         }
     }

@@ -1,13 +1,17 @@
 <resources>
     <string name="app_name">StatusBar Total</string>
     <string name="channel_name">Running total</string>
+    <string name="alerts_channel_name">Budget and reminders</string>
     <string name="notif_title">Total %1$s</string>
     <string name="notif_last_entry">Last entry: %1$s</string>
     <string name="notif_no_entries">No entries since reset</string>
     <string name="notif_action_add">+ Add</string>
-    <string name="notif_reply_hint">Amount (e.g. 450, 450 cc, 450 abc)</string>
-    <string name="error_invalid_entry">Type an amount like 450, 450 cc, 450 ccupi or 450 abc.</string>
+    <string name="notif_reply_hint">Amount (e.g. 450 or 450 abc)</string>
+    <string name="error_invalid_entry">Type an amount like 450, 450 abc or 450 ccupi.</string>
     <string name="error_no_card">No card \'%1$s\'. Add it in the app.</string>
+    <string name="error_need_card">Add the card code, like 450 abc.</string>
+    <string name="error_no_ccupi_card">Set a CC UPI card in the app.</string>
+    <string name="error_need_card_recurring">Choose a card (for CC UPI, set a default in Cards).</string>
     <string name="error_save_failed">Couldn\'t save. Phone storage may be full.</string>
 
     <string name="banner_text">Notifications are off, so the total can\'t show in the status bar.</string>

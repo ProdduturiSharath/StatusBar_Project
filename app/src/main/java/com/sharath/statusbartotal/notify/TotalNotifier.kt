@@ -14,6 +14,8 @@ import com.sharath.statusbartotal.MainActivity
 import com.sharath.statusbartotal.R
 import com.sharath.statusbartotal.RecurringRunner
 import com.sharath.statusbartotal.core.Breakdown
+import com.sharath.statusbartotal.core.Budget
+import com.sharath.statusbartotal.data.SettingsStore
 import com.sharath.statusbartotal.data.Cards
 import com.sharath.statusbartotal.core.IconLabel
 import com.sharath.statusbartotal.core.RupeeFormat
@@ -61,17 +63,27 @@ object TotalNotifier {
 
     fun refresh(context: Context, message: String? = null) {
         RecurringRunner.catchUpAndSchedule(context)
+        AlertNotifier.checkBudget(context)
         if (!canNotify(context)) return
         val snapshot = Ledger(File(context.filesDir, "ledger.txt")).snapshot()
         val cardNames = Cards(File(context.filesDir, "cards.txt")).read().associate { it.code to it.name }
-        val breakdown = Breakdown.lines(snapshot.buckets, cardNames)
+        val breakdown = Breakdown.lines(snapshot.buckets, cardNames, snapshot.cardCcUpi)
 
-        val icon = Icon.createWithBitmap(IconRenderer.render(IconLabel.lines(snapshot.total)))
-        val text = message
-            ?: snapshot.lastEntry?.let {
-                context.getString(R.string.notif_last_entry, RupeeFormat.signed(it))
-            }
-            ?: context.getString(R.string.notif_no_entries)
+        val settings = SettingsStore(File(context.filesDir, "settings.txt")).read()
+        val budget = settings.budget
+        // Status bar number: total spent, or budget left when chosen and a budget is set.
+        val iconValue = if (settings.showLeft && budget != null) budget - snapshot.total else snapshot.total
+        val icon = Icon.createWithBitmap(IconRenderer.render(IconLabel.lines(iconValue)))
+        val lastLine = snapshot.lastEntry?.let {
+            context.getString(R.string.notif_last_entry, RupeeFormat.signed(it))
+        } ?: context.getString(R.string.notif_no_entries)
+        // With a budget, its status is the first line and the last entry follows.
+        val lines = when {
+            message != null -> listOf(message)
+            budget != null -> listOf(Budget.notificationLine(snapshot.total, budget), lastLine)
+            else -> listOf(lastLine)
+        }
+        val text = lines.first()
 
         val tapIntent = PendingIntent.getActivity(
             context, REQ_TAP, Intent(context, MainActivity::class.java),
@@ -102,7 +114,7 @@ object TotalNotifier {
             )
             .setContentText(text)
             .setStyle(
-                Notification.BigTextStyle().bigText((listOf(text) + breakdown).joinToString("\n"))
+                Notification.BigTextStyle().bigText((lines + breakdown).joinToString("\n"))
             )
             .setOngoing(true)
             .setOnlyAlertOnce(true)

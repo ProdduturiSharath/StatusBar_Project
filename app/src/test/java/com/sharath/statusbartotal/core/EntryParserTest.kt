@@ -48,8 +48,10 @@ class EntryParserTest {
     @Test fun grammarTable() {
         assertEquals(ok(450, Category.UPI, null), entry("450"))
         assertEquals(ok(450, Category.UPI, null), entry("450 upi"))
-        assertEquals(ok(450, Category.CC, null), entry("450 cc"))
-        assertEquals(ok(450, Category.CCUPI, null), entry("450 ccupi"))
+        assertEquals(ParseResult.NeedCard, entry("450 cc"))
+        assertEquals(ParseResult.NoCcUpiCard, entry("450 ccupi"))
+        assertEquals(ok(450, Category.CCUPI, "xyz"), EntryParser.parseEntry("450 ccupi", cards, "xyz"))
+        assertEquals(ok(450, Category.CCUPI, "abc"), EntryParser.parseEntry("450 ccupi abc", cards, "xyz"))
         assertEquals(ok(450, Category.CC, "abc"), entry("450 abc"))
         assertEquals(ok(450, Category.CC, "abc"), entry("450 cc abc"))
         assertEquals(ok(450, Category.CCUPI, "abc"), entry("450 ccupi abc"))
@@ -73,6 +75,13 @@ class EntryParserTest {
         assertEquals(ParseResult.BadAmount, entry("450 cc cc"))
         assertEquals(ParseResult.BadAmount, entry("450 cc upi"))
         assertEquals(ParseResult.BadAmount, entry("450 ccupi ccupi"))
+    }
+
+    @Test fun v4GrammarChanges() {
+        assertEquals(ParseResult.NeedCard, entry("-450 CC"))
+        // A default that is no longer a saved card counts as no default.
+        assertEquals(ParseResult.NoCcUpiCard, EntryParser.parseEntry("450 ccupi", cards, "qqq"))
+        assertEquals(ok(450, Category.CC, "abc"), entry("450 cc abc"))
     }
 
     @Test fun unknownCard() {

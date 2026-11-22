@@ -16,10 +16,14 @@ class ReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val text = RemoteInput.getResultsFromIntent(intent)
             ?.getCharSequence(TotalNotifier.REPLY_KEY)?.toString() ?: ""
-        val known = Cards(File(context.filesDir, "cards.txt")).read().map { it.code }.toSet()
-        val message: String? = when (val result = EntryParser.parseEntry(text, known)) {
+        val cards = Cards(File(context.filesDir, "cards.txt")).read()
+        val known = cards.map { it.code }.toSet()
+        val ccUpi = cards.firstOrNull { it.ccUpiDefault }?.code
+        val message: String? = when (val result = EntryParser.parseEntry(text, known, ccUpi)) {
             is ParseResult.BadAmount -> context.getString(R.string.error_invalid_entry)
             is ParseResult.NoCard -> context.getString(R.string.error_no_card, result.word)
+            is ParseResult.NeedCard -> context.getString(R.string.error_need_card)
+            is ParseResult.NoCcUpiCard -> context.getString(R.string.error_no_ccupi_card)
             is ParseResult.Ok -> {
                 val ok = Ledger(File(context.filesDir, "ledger.txt")).addEntry(
                     result.amount, System.currentTimeMillis(), result.category, result.card, null

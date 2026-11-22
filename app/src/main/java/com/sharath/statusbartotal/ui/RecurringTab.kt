@@ -68,7 +68,7 @@ fun RecurringTab(state: AppState, modifier: Modifier = Modifier) {
     }
 
     if (showAdd) {
-        AddRecurringDialog(state.cards, onAdd = { state.addRecurring(it) }, onDismiss = { showAdd = false })
+        AddRecurringDialog(state.cards, state.ccUpiDefault?.code, onAdd = { state.addRecurring(it) }, onDismiss = { showAdd = false })
     }
     deleteTarget?.let { r ->
         ConfirmDialog(
