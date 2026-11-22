@@ -41,14 +41,16 @@ class Cards(private val file: File) {
      * Changes name, due day and the CC UPI default flag of an existing card. Turning the flag on
      * turns it off on every other card. False if the card or name is invalid or the write fails.
      */
-    fun update(code: String, name: String, dueDay: Int?, ccUpiDefault: Boolean): Boolean {
+    fun update(code: String, newCode: String, name: String, dueDay: Int?, ccUpiDefault: Boolean): Boolean {
         val n = cleanName(name) ?: return false
         if (dueDay != null && dueDay !in 1..31) return false
+        if (!isValidCode(newCode)) return false
         val cards = read()
         if (cards.none { it.code == code }) return false
+        if (newCode != code && cards.any { it.code == newCode }) return false
         return write(cards.map {
             when {
-                it.code == code -> Card(code, n, dueDay, ccUpiDefault)
+                it.code == code -> Card(newCode, n, dueDay, ccUpiDefault)
                 ccUpiDefault && it.ccUpiDefault -> it.copy(ccUpiDefault = false)
                 else -> it
             }

@@ -17,6 +17,7 @@ Permissions: show notifications, start after boot. Nothing else.
 
 | **V3.1** | Optimized release build (R8, whole app): about 2.3 MB instead of 26 MB, smoother UI. Signed with the same key, so it updates V3.0 in place. |
 | **V4.0** | Delete history entries (one, a cycle, or all; removed from totals); CC requires a card and a default card for CC UPI; edit saved cards (name, bill due day, CC UPI default); monthly budget with progress, one alert per cycle and a status bar toggle (total spent or budget left); card bill reminders 3 days before due; Summary tab comparing cycles; CSV cycle report saved to Downloads/StatusBarTotal at each auto-reset, plus Export now. |
+| **V4.1** | Card codes can be edited; old entries and recurring payments move to the new code. |
 
 V1 and V2 were not committed separately; this repository starts at V3. The
 design documents for every version are in `docs/designs/`.

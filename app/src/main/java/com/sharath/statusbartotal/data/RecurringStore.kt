@@ -18,6 +18,13 @@ class RecurringStore(private val file: File) {
 
     fun delete(id: Long): Boolean = write(read().filter { it.id != id })
 
+    /** Points every recurring payment using card [old] to [new]. */
+    fun renameCard(old: String, new: String): Boolean {
+        val items = read()
+        if (items.none { it.card == old }) return true
+        return write(items.map { if (it.card == old) it.copy(card = new) else it })
+    }
+
     companion object {
         fun format(r: Recurring): String = listOf(
             r.id, r.type.name, r.amount, r.category.name, r.card ?: "", r.day,

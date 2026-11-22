@@ -269,13 +269,14 @@ fun ResetDialog(total: Long, onConfirm: (Boolean) -> Unit, onDismiss: () -> Unit
     )
 }
 
-/** Edit a saved card: name, bill due day, CC UPI default switch, Delete. The code is fixed. */
+/** Edit a saved card: code, name, bill due day, CC UPI default switch, Delete. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditCardDialog(
-    card: Card, onSave: (String, Int?, Boolean) -> Boolean,
+    card: Card, takenCodes: Set<String>, onSave: (String, String, Int?, Boolean) -> Boolean,
     onDelete: () -> Unit, onDismiss: () -> Unit
 ) {
+    var code by rememberSaveable { mutableStateOf(card.code) }
     var name by rememberSaveable { mutableStateOf(card.name) }
     var due by rememberSaveable { mutableStateOf(card.dueDay) }
     var default by rememberSaveable { mutableStateOf(card.ccUpiDefault) }
@@ -291,7 +292,12 @@ fun EditCardDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
-                Text("Code ${card.code.uppercase()} cannot be changed. To use another code, add a new card.")
+                OutlinedTextField(
+                    value = code, onValueChange = { code = it.take(3) }, singleLine = true,
+                    label = { Text("Code (3 letters)") },
+                    supportingText = { Text("Changing it also moves old entries and recurring payments.") },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 OutlinedTextField(
                     value = name, onValueChange = { name = it }, singleLine = true,
                     label = { Text(stringResource(R.string.hint_card_name)) },
@@ -332,9 +338,12 @@ fun EditCardDialog(
         confirmButton = {
             TextButton(onClick = {
                 val n = Cards.cleanName(name)
+                val c = code.trim().lowercase()
                 error = when {
+                    !Cards.isValidCode(c) -> "Code must be 3 letters, not upi or cc."
+                    c != card.code && c in takenCodes -> "Another card already uses ${c.uppercase()}."
                     n == null -> nameErr
-                    !onSave(n, due, default) -> saveErr
+                    !onSave(c, n, due, default) -> saveErr
                     else -> null
                 }
                 if (error == null) onDismiss()

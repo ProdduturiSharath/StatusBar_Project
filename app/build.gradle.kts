@@ -13,8 +13,8 @@ android {
         applicationId = "com.sharath.statusbartotal"
         minSdk = 33
         targetSdk = 35
-        versionCode = 6
-        versionName = "4.0"
+        versionCode = 7
+        versionName = "4.1"
 
     }
 

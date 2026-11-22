@@ -49,8 +49,8 @@ class CardsV4Test {
         val cards = Cards(f)
         cards.add("abc", "A")
         cards.add("xyz", "B")
-        assertTrue(cards.update("abc", "A", 5, true))
-        assertTrue(cards.update("xyz", "B", null, true))
+        assertTrue(cards.update("abc", "abc", "A", 5, true))
+        assertTrue(cards.update("xyz", "xyz", "B", null, true))
         val read = cards.read()
         assertEquals(false, read.first { it.code == "abc" }.ccUpiDefault)
         assertEquals(true, read.first { it.code == "xyz" }.ccUpiDefault)
@@ -66,9 +66,9 @@ class CardsV4Test {
     @Test fun updateRejectsBadInput() {
         val cards = Cards(f)
         cards.add("abc", "A")
-        assertFalse(cards.update("abc", "   ", null, false))
-        assertFalse(cards.update("abc", "A", 32, false))
-        assertFalse(cards.update("zzz", "A", null, false))
+        assertFalse(cards.update("abc", "abc", "   ", null, false))
+        assertFalse(cards.update("abc", "abc", "A", 32, false))
+        assertFalse(cards.update("zzz", "zzz", "A", null, false))
         assertEquals("A", cards.read()[0].name)
     }
 
@@ -92,5 +92,31 @@ class CardsV4Test {
         // Old two-line file still reads.
         File(dir, "settings.txt").writeText("autoResetDay=3\nautoResetSince=99\n")
         assertEquals(AppSettings(3, 99L, null), s.read())
+    }
+
+    @org.junit.Test fun renameCodeMovesEntriesAndRecurringKeepsLineIds() {
+        val dir = java.nio.file.Files.createTempDirectory("rn").toFile()
+        val ledger = Ledger(java.io.File(dir, "ledger.txt"))
+        val cat = com.sharath.statusbartotal.core.Category.CC
+        org.junit.Assert.assertTrue(ledger.addEntry(100, 1, cat, "abc", null))
+        org.junit.Assert.assertTrue(ledger.addEntry(50, 2, cat, "xyz", null))
+        org.junit.Assert.assertTrue(ledger.reset(3))
+        org.junit.Assert.assertTrue(ledger.addEntry(30, 4, cat, "abc", null))
+        val before = java.io.File(dir, "ledger.txt").readLines().size
+        org.junit.Assert.assertTrue(ledger.renameCard("abc", "hdf"))
+        val lines = java.io.File(dir, "ledger.txt").readLines()
+        org.junit.Assert.assertEquals(before, lines.size)
+        org.junit.Assert.assertEquals("E,1,100,CC,hdf,", lines[0])
+        org.junit.Assert.assertEquals("E,2,50,CC,xyz,", lines[1])
+        val snap = ledger.snapshot()
+        org.junit.Assert.assertEquals(30L, snap.buckets["card:hdf"])
+        org.junit.Assert.assertEquals(null, snap.buckets["card:abc"])
+
+        val cards = Cards(java.io.File(dir, "cards.txt"))
+        org.junit.Assert.assertTrue(cards.add("abc", "A"))
+        org.junit.Assert.assertTrue(cards.add("xyz", "B"))
+        org.junit.Assert.assertFalse(cards.update("abc", "xyz", "A", null, false))
+        org.junit.Assert.assertTrue(cards.update("abc", "hdf", "A", 5, true))
+        org.junit.Assert.assertEquals(listOf("hdf", "xyz"), cards.read().map { it.code })
     }
 }

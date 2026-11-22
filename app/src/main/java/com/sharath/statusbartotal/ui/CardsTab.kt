@@ -125,7 +125,8 @@ fun CardsTab(state: AppState, modifier: Modifier = Modifier) {
     editTarget?.let { c ->
         EditCardDialog(
             card = c,
-            onSave = { name, due, default -> state.updateCard(c.code, name, due, default) },
+            takenCodes = state.cards.map { it.code }.toSet(),
+            onSave = { code, name, due, default -> state.updateCard(c.code, code, name, due, default) },
             onDelete = {
                 editTarget = null
                 val users = state.recurringUsing(c.code)

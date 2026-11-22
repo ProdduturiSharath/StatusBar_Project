@@ -144,8 +144,16 @@ class AppState(private val context: Context) {
         return ok
     }
 
-    fun updateCard(code: String, name: String, dueDay: Int?, ccUpiDefault: Boolean): Boolean {
-        val ok = cardStore.update(code, name, dueDay, ccUpiDefault)
+    fun updateCard(
+        code: String, newCode: String, name: String, dueDay: Int?, ccUpiDefault: Boolean
+    ): Boolean {
+        // Renaming a code: move old entries and recurring payments first, then the card itself.
+        if (newCode != code) {
+            if (!Cards.isValidCode(newCode) || cardStore.read().any { it.code == newCode }) return false
+            if (!Ledger(File(context.filesDir, "ledger.txt")).renameCard(code, newCode)) return false
+            if (!RecurringStore(File(context.filesDir, "recurring.txt")).renameCard(code, newCode)) return false
+        }
+        val ok = cardStore.update(code, newCode, name, dueDay, ccUpiDefault)
         reload()
         return ok
     }

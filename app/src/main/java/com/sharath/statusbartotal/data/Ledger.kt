@@ -230,6 +230,28 @@ class Ledger(private val file: File) {
         )
     }
 
+    /**
+     * Changes card code [old] to [new] on every entry line. Rewrites the file atomically with
+     * the same number of lines, so line ids (used by deletes and undo) do not change. A cut-off
+     * last piece (never counted) is dropped.
+     */
+    fun renameCard(old: String, new: String): Boolean {
+        return try {
+            if (!file.exists()) return true
+            val text = file.readText(Charsets.UTF_8)
+            val complete = text.substring(0, text.lastIndexOf('\n') + 1)
+            val out = StringBuilder(complete.length)
+            for (line in complete.split('\n').dropLast(1)) {
+                val parts = line.split(",").toMutableList()
+                if (parts.size == 6 && parts[0] == "E" && parts[4] == old) parts[4] = new
+                out.append(parts.joinToString(",")).append('\n')
+            }
+            AtomicWrite.write(file, out.toString())
+        } catch (e: IOException) {
+            false
+        }
+    }
+
     private fun append(line: String): Boolean {
         try {
             trimCutOffLine()
