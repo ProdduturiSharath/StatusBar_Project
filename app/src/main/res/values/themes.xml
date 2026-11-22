@@ -1,0 +1,7 @@
+<resources>
+    <!-- android:Theme.DeviceDefault.DayNight.NoActionBar does not exist in the framework; same effect via items. -->
+    <style name="Theme.StatusBarTotal" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
